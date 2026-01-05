@@ -442,29 +442,40 @@
         function validateURL(url) {
             try { new URL(url); return true; } catch { return false; }
         }
-
-        async function analyzeStore() {
-            const url = document.getElementById('urlInput').value.trim();
-            if (!url) { showError('أدخل رابط المتجر'); return; }
-            if (!validateURL(url)) { showError('الرابط غير صحيح'); return; }
+                async function analyzeStore() {
+            const urlInput = document.getElementById('urlInput').value.trim();
+            if (!urlInput) { showError('أدخل رابط المتجر'); return; }
+            if (!validateURL(urlInput)) { showError('الرابط غير صحيح'); return; }
 
             document.getElementById('loadingState').classList.add('active');
             document.getElementById('resultsSection').classList.remove('active');
 
-            const domain = new URL(url).hostname;
-
             try {
-                const [pageSpeed, screenshotUrl, serpData] = await Promise.all([
-                    fetchPageSpeed(url),
-                    getScreenshot(url),
-                    fetchSerpData(domain)
-                ]);
+                // استدعي Netlify Function بدل API مباشرة
+                const response = await fetch('/.netlify/functions/analyze', {
+                    method: 'POST',
+                    body: JSON.stringify({ siteUrl: urlInput })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API returned ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                const pageSpeed = data.pageSpeed;
+                const serpData = data.serpData;
+                const screenshotUrl = getScreenshot(urlInput);
 
                 const scores = buildScoresFromApis(pageSpeed, serpData);
 
                 displayResults({
-                    url,
-                    domain,
+                    url: urlInput,
+                    domain: data.domain,
                     scores,
                     pageSpeed,
                     screenshotUrl,
@@ -475,30 +486,17 @@
                 document.getElementById('resultsSection').classList.add('active');
             } catch (e) {
                 console.error(e);
-                showError('حدث خطأ أثناء التحليل، حاول مرة أخرى لاحقاً');
+                showError('حدث خطأ: ' + e.message);
                 document.getElementById('loadingState').classList.remove('active');
             }
         }
-
         async function fetchPageSpeed(url) {
             const apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&key=${PAGESPEED_API_KEY}`;
             const res = await fetch(apiUrl);
             if (!res.ok) throw new Error('PageSpeed API error');
             return res.json();
         }
-
-        async function getScreenshot(url) {
-            const apiUrl = `https://api.screenshotapi.net/screenshot?token=${SCREENSHOT_API_KEY}&url=${encodeURIComponent(url)}&output=image&file_type=png&full_page=true`;
-            return apiUrl;
-        }
-
-        async function fetchSerpData(domain) {
-            const apiUrl = `https://serpapi.com/search.json?engine=google&q=site:${encodeURIComponent(domain)}&api_key=${SERPAPI_KEY}`;
-            const res = await fetch(apiUrl);
-            if (!res.ok) throw new Error('SerpAPI error');
-            return res.json();
-        }
-
+        
         function buildScoresFromApis(pageSpeed, serpData) {
             let performance = 0, seo = 0, mobile = 0, security = 70, conversion = 50;
 
